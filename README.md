@@ -24,7 +24,7 @@ the trained-format prompt strings** — the part T2I sheet makers don't give you
 
 ## What it does
 
-- Composites a reference sheet onto a **black 768×448 canvas** (the trained bucket), **no baked text**.
+- Composites a reference sheet onto a **black canvas** (default 1920×1080; set it to match your output video resolution — reference downscale factor is 1), **no baked text**.
 - 10 **role-aware layout templates** — location and primary-character panels get the
   most space, because the model card says *"bigger panels carry over better."*
 - A **Custom** template that reads a normalized-rect layout JSON, so you can size
@@ -72,30 +72,26 @@ filled it; otherwise the chosen vision backend captions the image. With
 | `generated_video_prompt` (STRING) | `Generated video: ...` |
 | `negative_prompt` (STRING) | The card's recommended negative |
 | `labeled_preview` (IMAGE) | Same layout **with** panel numbers, for your eyes only — never feed this to the LoRA |
+| `layout_map` (IMAGE) | A diagram of the chosen template (numbered, colored panels) so you can see the layout |
 
 ---
 
-## Vision backends (modular, swappable)
+## Captioning (external — V2)
 
-Pick how you caption panels. All behind one dropdown:
+V2 does **not** caption inside this node. You caption each panel **externally** and
+wire the resulting text into the `desc_*` inputs. This keeps the node small, makes
+each caption visible/debuggable on its own, and lets you use whatever captioner you
+like.
 
-- **`none`** — no model; uses your typed `desc_*` fields.
-- **`ollama`** — local Ollama server. NSFW-safe, no key. **Recommended for character work.**
-  Requires Ollama running with a vision model pulled: `ollama pull llava` (or a qwen2-vl gguf).
-  Set `vision_base_url` to `http://localhost:11434`.
-- **`openai_compatible`** — any OpenAI-style `/v1/chat/completions` vision endpoint:
-  Grok/xAI (`https://api.x.ai/v1`), LM Studio (`http://localhost:1234/v1`), OpenRouter, etc.
-- **`gemini`** — Google Gemini API.
-- **`anthropic`** — Anthropic API.
+Recommended: a **`TextGenerate`** node (from `comfyui-easy-use`) per panel, with a
+`CLIPLoader`/text-encoder loader pointed at a vision-capable model (e.g. a Gemma or
+Qwen-VL encoder you already use). Feed each panel image into a TextGenerate, wire its
+text output into the matching `desc_*` input. You can also just type a description, or
+leave a `desc_*` empty to skip that panel.
 
-> **NSFW caveat:** cloud vision APIs (gemini, anthropic, most hosted
-> openai_compatible providers) will refuse explicit imagery. For NSFW panels use
-> **`ollama`** locally. The cloud backends are fine for SFW props/locations.
-
-Adding a backend later is one function in `vision_backends.py` — they all share
-one interface and return a caption string.
-
----
+> NSFW: because captioning is external and local (TextGenerate runs the model in
+> ComfyUI), there's no cloud filter to refuse explicit panels — use a local
+> vision-capable encoder.
 
 ## Custom layout JSON
 

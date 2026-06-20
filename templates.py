@@ -1,52 +1,73 @@
 """
-Layout templates for the Ingredients Sheet Builder.
+Layout templates for the Ingredients Sheet Builder (V2).
 
-Each template is a list of "slots". A slot is a dict:
-    {
-        "slot": <int>,            # which image input fills it (1..N); 0 = background/location
-        "x": <float 0..1>,        # left edge as fraction of canvas width
-        "y": <float 0..1>,        # top edge as fraction of canvas height
-        "w": <float 0..1>,        # width as fraction of canvas width
-        "h": <float 0..1>,        # height as fraction of canvas height
-        "role": <str>,            # informational: "location" | "character" | "face" | "prop" | "element"
-    }
+Each slot: {slot, x, y, w, h, role} with x/y/w/h normalized 0..1.
+slot 0 = background/location input. role in:
+location|character|face|prop|element.
 
-Design principle from the LTX-2.3 IC-LoRA Ingredients model card:
-    "Bigger panels carry over better. The more space an element takes up in the
-     reference image, the more faithfully it carries over into the generated video."
-So in every template the LOCATION panel and the PRIMARY CHARACTER panel get the
-most real estate; secondary elements (faces, props) get smaller panels.
+Model-card principle: bigger panels carry over better, so location and primary
+character panels get the most space.
 
-Coordinates are normalized (0..1) so templates are resolution-independent.
-The "Custom" template is handled separately by reading the layout_json widget.
+V2 adds position_name() so the node can label panels in the trained format:
+    **Top Row Left (Character):** <caption>
+plus presets where the location spans a full row.
 """
 
-# Slot 0 is conventionally the background/location panel.
-# Every other slot is a numbered element image input.
+
+def position_name(slot):
+    """Human label for a slot derived from its rect: 'Top Row Left',
+    'Bottom Row Right', 'Middle Center', 'Full Width Top', 'Full Frame', etc."""
+    x, y, w, h = slot["x"], slot["y"], slot["w"], slot["h"]
+    cx = x + w / 2.0
+    cy = y + h / 2.0
+    full_w = w >= 0.85
+    full_h = h >= 0.85
+    if full_w and full_h:
+        return "Full Frame"
+    if cy < 0.34:
+        vband = "Top"
+    elif cy < 0.67:
+        vband = "Middle"
+    else:
+        vband = "Bottom"
+    if full_w:
+        return f"Full Width {vband}"
+    if cx < 0.34:
+        hband = "Left"
+    elif cx < 0.67:
+        hband = "Center"
+    else:
+        hband = "Right"
+    if vband in ("Top", "Bottom"):
+        return f"{vband} Row {hband}"
+    return f"{vband} {hband}"
+
+
+def role_label(role):
+    return {
+        "location": "Setting",
+        "character": "Character",
+        "face": "Character - Face",
+        "prop": "Prop",
+        "element": "Element",
+    }.get(role, "Element")
+
 
 TEMPLATES = {
-    # ------------------------------------------------------------------ #
-    # 1. Single character turnaround + location
     "1 char + location": [
         {"slot": 0, "x": 0.50, "y": 0.00, "w": 0.50, "h": 1.00, "role": "location"},
         {"slot": 1, "x": 0.00, "y": 0.00, "w": 0.50, "h": 1.00, "role": "character"},
     ],
-
-    # 2. Character turnaround + face close-up + location
     "char + face + location": [
         {"slot": 0, "x": 0.62, "y": 0.00, "w": 0.38, "h": 1.00, "role": "location"},
         {"slot": 1, "x": 0.00, "y": 0.00, "w": 0.38, "h": 1.00, "role": "character"},
         {"slot": 2, "x": 0.38, "y": 0.00, "w": 0.24, "h": 1.00, "role": "face"},
     ],
-
-    # 3. Classic 1x3 row (e.g. left / front / right) - equal panels
     "1x3 row": [
-        {"slot": 1, "x": 0.00, "y": 0.00, "w": 0.3333, "h": 1.00, "role": "character"},
+        {"slot": 1, "x": 0.0000, "y": 0.00, "w": 0.3333, "h": 1.00, "role": "character"},
         {"slot": 2, "x": 0.3333, "y": 0.00, "w": 0.3333, "h": 1.00, "role": "character"},
         {"slot": 3, "x": 0.6666, "y": 0.00, "w": 0.3334, "h": 1.00, "role": "character"},
     ],
-
-    # 4. 1x5 row (full 5-angle turnaround)
     "1x5 row": [
         {"slot": 1, "x": 0.00, "y": 0.00, "w": 0.20, "h": 1.00, "role": "character"},
         {"slot": 2, "x": 0.20, "y": 0.00, "w": 0.20, "h": 1.00, "role": "character"},
@@ -54,16 +75,12 @@ TEMPLATES = {
         {"slot": 4, "x": 0.60, "y": 0.00, "w": 0.20, "h": 1.00, "role": "character"},
         {"slot": 5, "x": 0.80, "y": 0.00, "w": 0.20, "h": 1.00, "role": "character"},
     ],
-
-    # 5. 2x2 grid
     "2x2 grid": [
         {"slot": 1, "x": 0.00, "y": 0.00, "w": 0.50, "h": 0.50, "role": "element"},
         {"slot": 2, "x": 0.50, "y": 0.00, "w": 0.50, "h": 0.50, "role": "element"},
         {"slot": 3, "x": 0.00, "y": 0.50, "w": 0.50, "h": 0.50, "role": "element"},
         {"slot": 4, "x": 0.50, "y": 0.50, "w": 0.50, "h": 0.50, "role": "element"},
     ],
-
-    # 6. 2x3 grid (6 elements)
     "2x3 grid": [
         {"slot": 1, "x": 0.0000, "y": 0.00, "w": 0.3333, "h": 0.50, "role": "element"},
         {"slot": 2, "x": 0.3333, "y": 0.00, "w": 0.3333, "h": 0.50, "role": "element"},
@@ -72,8 +89,6 @@ TEMPLATES = {
         {"slot": 5, "x": 0.3333, "y": 0.50, "w": 0.3333, "h": 0.50, "role": "element"},
         {"slot": 6, "x": 0.6666, "y": 0.50, "w": 0.3334, "h": 0.50, "role": "element"},
     ],
-
-    # 7. 2x4 grid (8-angle full turnaround)
     "2x4 grid (8 angles)": [
         {"slot": 1, "x": 0.00, "y": 0.00, "w": 0.25, "h": 0.50, "role": "character"},
         {"slot": 2, "x": 0.25, "y": 0.00, "w": 0.25, "h": 0.50, "role": "character"},
@@ -84,47 +99,36 @@ TEMPLATES = {
         {"slot": 7, "x": 0.50, "y": 0.50, "w": 0.25, "h": 0.50, "role": "character"},
         {"slot": 8, "x": 0.75, "y": 0.50, "w": 0.25, "h": 0.50, "role": "character"},
     ],
-
-    # 8. Hero character + location + supporting strip
-    #    Big character left, big location top-right, 3 small supporting bottom-right.
-    "hero + location + strip": [
-        {"slot": 1, "x": 0.00, "y": 0.00, "w": 0.45, "h": 1.00, "role": "character"},
-        {"slot": 0, "x": 0.45, "y": 0.00, "w": 0.55, "h": 0.60, "role": "location"},
-        {"slot": 2, "x": 0.45, "y": 0.60, "w": 0.1833, "h": 0.40, "role": "element"},
-        {"slot": 3, "x": 0.6333, "y": 0.60, "w": 0.1833, "h": 0.40, "role": "element"},
-        {"slot": 4, "x": 0.8166, "y": 0.60, "w": 0.1834, "h": 0.40, "role": "element"},
+    "chars + location bottom row": [
+        {"slot": 1, "x": 0.0000, "y": 0.00, "w": 0.3333, "h": 0.55, "role": "character"},
+        {"slot": 2, "x": 0.3333, "y": 0.00, "w": 0.3333, "h": 0.55, "role": "character"},
+        {"slot": 3, "x": 0.6666, "y": 0.00, "w": 0.3334, "h": 0.55, "role": "character"},
+        {"slot": 0, "x": 0.0000, "y": 0.55, "w": 1.00, "h": 0.45, "role": "location"},
     ],
-
-    # 9. Two characters + prop + location (multi-character scene)
-    #    Two character panels left, big location right, prop inset bottom.
-    "2 chars + prop + location": [
-        {"slot": 1, "x": 0.00, "y": 0.00, "w": 0.30, "h": 0.65, "role": "character"},
-        {"slot": 2, "x": 0.30, "y": 0.00, "w": 0.30, "h": 0.65, "role": "character"},
-        {"slot": 0, "x": 0.60, "y": 0.00, "w": 0.40, "h": 1.00, "role": "location"},
-        {"slot": 3, "x": 0.00, "y": 0.65, "w": 0.60, "h": 0.35, "role": "prop"},
+    "chars + location top row": [
+        {"slot": 0, "x": 0.00, "y": 0.00, "w": 1.00, "h": 0.45, "role": "location"},
+        {"slot": 1, "x": 0.00, "y": 0.45, "w": 0.25, "h": 0.55, "role": "character"},
+        {"slot": 2, "x": 0.25, "y": 0.45, "w": 0.25, "h": 0.55, "role": "character"},
+        {"slot": 3, "x": 0.50, "y": 0.45, "w": 0.25, "h": 0.55, "role": "character"},
+        {"slot": 4, "x": 0.75, "y": 0.45, "w": 0.25, "h": 0.55, "role": "character"},
     ],
-
-    # 10. Cinematic: huge location backdrop with character + face insets on top
-    #     (location is the dominant panel; good for environment-heavy scenes)
-    "location hero + insets": [
-        {"slot": 0, "x": 0.00, "y": 0.00, "w": 1.00, "h": 1.00, "role": "location"},
-        {"slot": 1, "x": 0.02, "y": 0.30, "w": 0.30, "h": 0.68, "role": "character"},
-        {"slot": 2, "x": 0.34, "y": 0.55, "w": 0.20, "h": 0.43, "role": "face"},
-        {"slot": 3, "x": 0.78, "y": 0.55, "w": 0.20, "h": 0.43, "role": "prop"},
+    "full kit + location bottom": [
+        {"slot": 1, "x": 0.00, "y": 0.00, "w": 0.34, "h": 0.55, "role": "character"},
+        {"slot": 2, "x": 0.34, "y": 0.00, "w": 0.22, "h": 0.55, "role": "face"},
+        {"slot": 3, "x": 0.56, "y": 0.00, "w": 0.22, "h": 0.55, "role": "prop"},
+        {"slot": 4, "x": 0.78, "y": 0.00, "w": 0.22, "h": 0.55, "role": "prop"},
+        {"slot": 0, "x": 0.00, "y": 0.55, "w": 1.00, "h": 0.45, "role": "location"},
     ],
 }
 
-# Display order for the dropdown (presets first, Custom appended by the node).
 TEMPLATE_NAMES = list(TEMPLATES.keys())
 
 
 def get_template(name):
-    """Return the slot list for a named preset, or None if not found."""
     return TEMPLATES.get(name)
 
 
 def max_slot_in_templates():
-    """Highest numbered element slot across all presets (for declaring inputs)."""
     hi = 0
     for slots in TEMPLATES.values():
         for s in slots:

@@ -1,0 +1,17 @@
+[project]
+name = "comfyui-ingredients-sheet-builder"
+description = "Build LTX-2.3 IC-LoRA Ingredients reference sheets from your own images — any layout, per-panel captions, and trained-format prompt output."
+version = "0.2.0"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+dependencies = [
+    "Pillow>=9.0.0",
+]
+
+[project.urls]
+Repository = "https://github.com/gregowahoo/comfyui-ingredients-sheet-builder"
+
+[tool.comfy]
+PublisherId = "gregowahoo"
+DisplayName = "Ingredients Sheet Builder"
+Icon = ""
