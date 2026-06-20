@@ -176,7 +176,7 @@ class IngredientsSheetBuilder:
             cw = int(s["w"] * w); ch = int(s["h"] * h)
             col = _ROLE_COLORS.get(role, (110, 90, 130))
             draw.rectangle([x + 4, y + 4, x + cw - 4, y + ch - 4], fill=col, outline=(230, 230, 230), width=2)
-            pos = position_name(s)
+            pos = position_name(s, slots)
             tag = f"#{sid}  {role}\n{pos}"
             draw.multiline_text((x + 14, y + 14), tag, fill=(245, 245, 245), font=f, spacing=4)
         return img
@@ -225,14 +225,14 @@ class IngredientsSheetBuilder:
                 preview.paste(fitted, (x, y))
 
             if preview_labels:
-                pos = position_name(s)
+                pos = position_name(s, slots)
                 tag = f"{sid}:{pos}"
                 draw.rectangle([x, y, x + w - 1, y + h - 1], outline=(255, 0, 0), width=2)
                 draw.text((x + 6, y + 6), tag, fill=(255, 0, 0), font=font)
 
             desc = slot_desc(sid)
             if desc:
-                pos = position_name(s)
+                pos = position_name(s, slots)
                 rl = role_label(role)
                 panel_lines.append(f"**{pos} ({rl}):** {desc}")
 

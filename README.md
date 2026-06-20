@@ -36,6 +36,10 @@ the trained-format prompt strings** — the part T2I sheet makers don't give you
 
 ---
 
+## Layout templates
+
+See `layout_templates_reference.png` for a visual map of all 10 presets (panel positions, slot numbers, and roles). Wire the node's `layout_map` output to a Preview Image node to see the currently-selected layout after a run.
+
 ## Inputs
 
 **Required**

@@ -14,30 +14,62 @@ plus presets where the location spans a full row.
 """
 
 
-def position_name(slot):
-    """Human label for a slot derived from its rect: 'Top Row Left',
-    'Bottom Row Right', 'Middle Center', 'Full Width Top', 'Full Frame', etc."""
+def _vband(slot):
+    cy = slot["y"] + slot["h"] / 2.0
+    if cy < 0.34:
+        return "Top"
+    if cy < 0.67:
+        return "Middle"
+    return "Bottom"
+
+
+def position_name(slot, all_slots=None):
+    """Human label for a slot. If all_slots is given, horizontal granularity is
+    chosen by how many panels share the slot's row (so labels stay distinct and
+    consistent across a row): 4+ in a row -> Far Left/Left/Right/Far Right;
+    3 -> Left/Center/Right; 2 -> Left/Right; 1 -> (no h-label).
+    Full-width -> 'Full Width <band>'. Full-frame -> 'Full Frame'."""
     x, y, w, h = slot["x"], slot["y"], slot["w"], slot["h"]
     cx = x + w / 2.0
-    cy = y + h / 2.0
     full_w = w >= 0.85
     full_h = h >= 0.85
     if full_w and full_h:
         return "Full Frame"
-    if cy < 0.34:
-        vband = "Top"
-    elif cy < 0.67:
-        vband = "Middle"
-    else:
-        vband = "Bottom"
+    vband = _vband(slot)
     if full_w:
         return f"Full Width {vband}"
-    if cx < 0.34:
-        hband = "Left"
-    elif cx < 0.67:
-        hband = "Center"
+
+    # how many panels share this row?
+    if all_slots:
+        row_mates = [s for s in all_slots if _vband(s) == vband and s.get("w", 0) < 0.85]
+        n = len(row_mates)
+        # this slot's left-to-right rank within the row
+        row_sorted = sorted(row_mates, key=lambda s: s["x"] + s["w"] / 2.0)
+        try:
+            rank = row_sorted.index(slot)
+        except ValueError:
+            # slot not identity-present (e.g. custom dict copy); fall back to cx position
+            rank = sum(1 for s in row_sorted if (s["x"] + s["w"] / 2.0) < cx)
     else:
-        hband = "Right"
+        n, rank = 1, 0
+
+    if n <= 1:
+        hband = ""
+    elif n == 2:
+        hband = ["Left", "Right"][min(rank, 1)]
+    elif n == 3:
+        hband = ["Left", "Center", "Right"][min(rank, 2)]
+    else:  # 4+
+        labels4 = ["Far Left", "Left", "Right", "Far Right"]
+        if n == 4:
+            hband = labels4[min(rank, 3)]
+        else:
+            # 5+: number them to stay unique
+            hband = f"#{rank + 1}"
+
+    if not hband:
+        base = f"{vband} Row" if vband in ("Top", "Bottom") else vband
+        return base
     if vband in ("Top", "Bottom"):
         return f"{vband} Row {hband}"
     return f"{vband} {hband}"
