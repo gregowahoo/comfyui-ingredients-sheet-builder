@@ -144,9 +144,8 @@ hallucinate a description.
 
 ## Custom layout JSON
 
-When `template = Custom` (Template mode), `layout_json` is a list of slots.
-Coordinates are fractions of the canvas (0–1), so layouts are resolution-independent.
-`slot 0` is the background/location input.
+When `template = Custom` (Template mode), `layout_json` lets you hand-design your own
+grid instead of using a preset. It's a list of panels; each panel is one line:
 
 ```json
 [
@@ -156,9 +155,23 @@ Coordinates are fractions of the canvas (0–1), so layouts are resolution-indep
 ]
 ```
 
-`role` is one of `location` / `character` / `face` / `prop` / `element`, and feeds
-the parenthetical in the prompt (`(Setting)` / `(Character)` / etc.). Bigger
-rectangles reproduce more faithfully — give important elements more space.
+Each key:
+- `slot` — which image input fills this panel. `0` = the `background`/location input;
+  `1`–`9` = `image_1`..`image_9`.
+- `x`, `y` — top-left corner of the panel, as a fraction of the sheet (`0.0`–`1.0`).
+  `x:0, y:0` is the top-left corner; `x:0.5, y:0` is the top-middle.
+- `w`, `h` — width and height of the panel, also fractions. `w:0.5` = half the sheet
+  wide; `h:0.45` = 45% of the sheet tall.
+- `role` — one of `location` / `character` / `face` / `prop` / `element`. This only
+  affects the prompt label (`(Setting)` / `(Character)` / etc.), not the image.
+
+So the example above = location across the full bottom (`w:1.0`), two character panels
+splitting the top half. Bigger rectangles reproduce more faithfully — give important
+elements more space.
+
+**You don't need this for normal use** — the 10 presets and the no-crop modes cover
+almost everything. It's only here for pixel-precise custom grids. Leave the field
+alone unless you set `template = Custom`; it's ignored otherwise.
 
 ---
 
