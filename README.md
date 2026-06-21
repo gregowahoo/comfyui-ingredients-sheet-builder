@@ -40,6 +40,24 @@ the trained-format prompt strings** — the part T2I sheet makers don't give you
 
 See `layout_templates_reference.png` for a visual map of all 10 presets (panel positions, slot numbers, and roles). Wire the node's `layout_map` output to a Preview Image node to see the currently-selected layout after a run.
 
+## Layout modes (V2.1)
+
+The node has three `layout_mode` options:
+
+- **Template (fixed grid)** — pick a preset (or Custom JSON) of fixed rectangles.
+  Images are fit into panels with `crop_fill` (fills, may crop) or `fit_pad`
+  (whole image, padded). Exact, grid-like; can crop tall images.
+- **Auto-fit rows (no crop)** — images keep their native aspect ratio and are
+  laid out in rows you define via `row_assignment` (e.g. `1,2,3 | 0` = images
+  1-3 on one row, the location/background on the next). All images in a row share
+  a height; the sheet width/height adapt. **Nothing is ever cropped.**
+- **Free pack (no crop)** — images keep native aspect and flow left-to-right,
+  wrapping to new rows automatically. **Nothing is ever cropped.**
+
+Use the no-crop modes when keeping the *whole* character visible matters more
+than the sheet being a tidy rectangle — the IC-LoRA model only needs to see each
+element clearly. `row_target_height` controls how big the panels (and sheet) are.
+
 ## Inputs
 
 **Required**

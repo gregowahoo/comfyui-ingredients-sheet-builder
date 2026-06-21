@@ -27,6 +27,7 @@ from .templates import (
     TEMPLATES, TEMPLATE_NAMES, get_template, max_slot_in_templates,
     position_name, role_label,
 )
+from ._packers import free_pack, autofit_rows, position_name_packed, add_full_width_band
 
 MAX_SLOTS = max(9, max_slot_in_templates())
 CARD_NEGATIVE = "worst quality, inconsistent motion, blurry, jittery, distorted"
@@ -113,15 +114,33 @@ class IngredientsSheetBuilder:
 
         return {
             "required": {
-                "template": (TEMPLATE_NAMES + ["Custom"], {"default": TEMPLATE_NAMES[0]}),
+                "layout_mode": (["Template (fixed grid)",
+                                 "Auto-fit rows (no crop)",
+                                 "Free pack (no crop)"],
+                                {"default": "Template (fixed grid)",
+                                 "tooltip": "Template = exact grid, may crop/pad to fit panels. "
+                                            "Auto-fit rows = images keep native shape, lined up by "
+                                            "row, never cropped. Free pack = images flow left-to-right "
+                                            "and wrap, never cropped. Use the no-crop modes when "
+                                            "keeping the whole character matters more than sheet shape."}),
+                "template": (TEMPLATE_NAMES + ["Custom"], {"default": TEMPLATE_NAMES[0],
+                              "tooltip": "Used when layout_mode = Template."}),
                 "canvas_width": ("INT", {"default": 1920, "min": 64, "max": 8192, "step": 8,
-                                         "tooltip": "Set to match your OUTPUT video resolution "
-                                                    "(reference downscale factor = 1)."}),
-                "canvas_height": ("INT", {"default": 1080, "min": 64, "max": 8192, "step": 8}),
+                                         "tooltip": "Template mode: exact canvas size (match output res). "
+                                                    "No-crop modes: used as the max width before wrapping."}),
+                "canvas_height": ("INT", {"default": 1080, "min": 64, "max": 8192, "step": 8,
+                                          "tooltip": "Template mode: exact canvas height. "
+                                                     "No-crop modes: ignored (height grows to fit)."}),
+                "row_target_height": ("INT", {"default": 560, "min": 64, "max": 4096, "step": 8,
+                                              "tooltip": "No-crop modes only: height each image/row is "
+                                                         "scaled to. Bigger = larger panels + taller sheet."}),
                 "background_color": (["black", "white"], {"default": "black"}),
-                "fit_mode": (["crop_fill", "fit_pad"], {"default": "crop_fill"}),
+                "fit_mode": (["crop_fill", "fit_pad"], {"default": "crop_fill",
+                              "tooltip": "Template mode only. crop_fill fills panels (may crop); "
+                                         "fit_pad shows whole image with padding. No-crop modes "
+                                         "ignore this (they never crop)."}),
                 "panel_gap": ("INT", {"default": 0, "min": 0, "max": 128, "step": 1,
-                                      "tooltip": "Gap between panels in pixels. Keep 0 for IC-LoRA."}),
+                                      "tooltip": "Gap between panels in pixels."}),
                 "generated_video_action": ("STRING", {
                     "multiline": True,
                     "default": "the character walks forward through the scene, cinematic lighting",
@@ -130,6 +149,18 @@ class IngredientsSheetBuilder:
                 "preview_labels": ("BOOLEAN", {"default": False,
                                                "tooltip": "Draw panel numbers on a SEPARATE preview image. "
                                                           "Never baked into the sheet you feed the LoRA."}),
+                "row_assignment": ("STRING", {
+                    "default": "1,2,3 | 0",
+                    "tooltip": "Auto-fit rows mode only. Group image slots into rows with commas, "
+                               "separate rows with '|'. 0 = the background/location input. "
+                               "Example '1,2,3 | 4,5 | 0' = chars row, more chars, location row."}),
+                "location_full_width": ("BOOLEAN", {"default": True,
+                                "tooltip": "No-crop modes: always span the background/location image "
+                                           "across the full width of the sheet as its own band, no "
+                                           "matter how many other images. Ignored in Template mode."}),
+                "location_band_position": (["bottom", "top"], {"default": "bottom",
+                                "tooltip": "Where the full-width location band sits when "
+                                           "location_full_width is on."}),
                 "layout_json": ("STRING", {
                     "multiline": True,
                     "default": ('[\n'
@@ -137,16 +168,15 @@ class IngredientsSheetBuilder:
                                 '  {"slot": 1, "x": 0.0, "y": 0.0, "w": 0.5, "h": 0.55, "role": "character"},\n'
                                 '  {"slot": 2, "x": 0.5, "y": 0.0, "w": 0.5, "h": 0.55, "role": "character"}\n'
                                 ']'),
-                    "tooltip": "Used only when template = Custom. Normalized (0-1) rects. "
-                               "slot 0 = background/location input.",
+                    "tooltip": "Used only when template = Custom (Template mode). Normalized (0-1) rects.",
                 }),
             },
             "optional": optional,
         }
 
-    RETURN_TYPES = ("IMAGE", "STRING", "STRING", "STRING", "IMAGE", "IMAGE")
-    RETURN_NAMES = ("sheet_image", "reference_sheet_prompt", "generated_video_prompt",
-                    "negative_prompt", "labeled_preview", "layout_map")
+    RETURN_TYPES = ("IMAGE", "STRING", "STRING", "STRING", "STRING", "IMAGE", "IMAGE")
+    RETURN_NAMES = ("sheet_image", "full_prompt", "reference_sheet_prompt",
+                    "generated_video_prompt", "negative_prompt", "labeled_preview", "layout_map")
     FUNCTION = "build"
     CATEGORY = "Ingredients"
     DESCRIPTION = ("Prep step for the LTX-2.3 IC-LoRA Ingredients workflow. Composes a "
@@ -181,17 +211,12 @@ class IngredientsSheetBuilder:
             draw.multiline_text((x + 14, y + 14), tag, fill=(245, 245, 245), font=f, spacing=4)
         return img
 
-    def build(self, template, canvas_width, canvas_height, background_color, fit_mode,
-              panel_gap, generated_video_action, preview_labels, layout_json="",
-              **kwargs):
-
-        slots = self._resolve_layout(template, layout_json)
+    def build(self, layout_mode, template, canvas_width, canvas_height, row_target_height,
+              background_color, fit_mode, panel_gap, generated_video_action, preview_labels,
+              row_assignment="", location_full_width=True, location_band_position="bottom",
+              layout_json="", **kwargs):
 
         bg_rgb = (0, 0, 0) if background_color == "black" else (255, 255, 255)
-        canvas = Image.new("RGB", (canvas_width, canvas_height), bg_rgb)
-        preview = canvas.copy()
-        draw = ImageDraw.Draw(preview)
-        font = _font(max(16, canvas_height // 40))
 
         def slot_image(sid):
             if sid == 0:
@@ -203,7 +228,127 @@ class IngredientsSheetBuilder:
                 return (kwargs.get("background_desc") or "").strip()
             return (kwargs.get(f"desc_{sid}") or "").strip()
 
-        # order slots in reading order for the prompt
+        def slot_role(sid):
+            if sid == 0:
+                return "location"
+            return "character"
+
+        # ----------------------------------------------------------------- #
+        # NO-CROP MODES (A free pack / B auto-fit rows)
+        # ----------------------------------------------------------------- #
+        if layout_mode in ("Auto-fit rows (no crop)", "Free pack (no crop)"):
+            gap = max(panel_gap, 6)
+            have_bg = slot_image(0) is not None
+            span_location = bool(location_full_width) and have_bg
+
+            if layout_mode == "Free pack (no crop)":
+                # gather present images; skip bg here if it will be a full-width band
+                items = []
+                if have_bg and not span_location:
+                    items.append((0, slot_role(0), slot_image(0)))
+                for i in range(1, MAX_SLOTS + 1):
+                    im = slot_image(i)
+                    if im is not None:
+                        items.append((i, slot_role(i), im))
+                placed, cw, ch = free_pack(items, target_h=row_target_height,
+                                           max_width=canvas_width, gap=gap)
+            else:
+                # Auto-fit rows: parse row_assignment like "1,2,3 | 0"
+                rows_items = []
+                spec = row_assignment.strip() or "1,2,3 | 0"
+                for chunk in spec.split("|"):
+                    row = []
+                    for tok in chunk.split(","):
+                        tok = tok.strip()
+                        if not (tok.lstrip("-").isdigit()):
+                            continue
+                        sid = int(tok)
+                        if sid == 0 and span_location:
+                            continue  # handled as full-width band below
+                        im = slot_image(sid)
+                        if im is not None:
+                            row.append((sid, slot_role(sid), im))
+                    if row:
+                        rows_items.append(row)
+                # if nothing left (e.g. only bg), give a minimal width to anchor the band
+                if rows_items:
+                    placed, cw, ch = autofit_rows(rows_items, row_height=row_target_height,
+                                                  max_width=max(canvas_width, 256), gap=gap)
+                else:
+                    placed, cw, ch = [], max(canvas_width, 256), 0
+
+            # add the location as a full-width band spanning the whole sheet.
+            # Ensure the sheet is a sensible width: at least the location's own
+            # natural width at row height, and not absurdly narrow for few chars.
+            if span_location:
+                bg_img = slot_image(0)
+                biw, bih = bg_img.size
+                bg_aspect = biw / bih if bih else 1.0
+                # candidate widths: current char-row width, location at row height,
+                # and a floor so a single character doesn't make a tiny sheet.
+                loc_natural_w = int(round(row_target_height * bg_aspect))
+                target_w = max(cw, loc_natural_w, min(canvas_width, 1280))
+                # re-center existing character rows to target_w
+                if placed and target_w > cw:
+                    # shift each rect so its row is centered in target_w
+                    rows_by_y = {}
+                    for p in placed:
+                        rows_by_y.setdefault(p["y"], []).append(p)
+                    recentered = []
+                    for yk, row in rows_by_y.items():
+                        row_sorted = sorted(row, key=lambda q: q["x"])
+                        row_w = (row_sorted[-1]["x"] + row_sorted[-1]["w"]) - row_sorted[0]["x"]
+                        offset = (target_w - row_w) // 2 - row_sorted[0]["x"]
+                        for q in row_sorted:
+                            nq = dict(q); nq["x"] = q["x"] + offset
+                            recentered.append(nq)
+                    placed = recentered
+                cw = target_w
+                placed, cw, ch = add_full_width_band(
+                    placed, cw, bg_img, 0, slot_role(0),
+                    at_bottom=(location_band_position == "bottom"), gap=gap)
+
+            canvas = Image.new("RGB", (cw, ch), bg_rgb)
+            preview = canvas.copy()
+            pdraw = ImageDraw.Draw(preview)
+            pfont = _font(max(16, row_target_height // 18))
+
+            panel_lines = []
+            # reading order: top-to-bottom, left-to-right
+            for p in sorted(placed, key=lambda q: (q["y"], q["x"])):
+                img = slot_image(p["slot"])
+                if img is None:
+                    continue
+                resized = img.resize((max(1, p["w"]), max(1, p["h"])), Image.LANCZOS)
+                canvas.paste(resized, (p["x"], p["y"]))
+                preview.paste(resized, (p["x"], p["y"]))
+                pos = position_name_packed(p, placed)
+                if preview_labels:
+                    pdraw.rectangle([p["x"], p["y"], p["x"]+p["w"]-1, p["y"]+p["h"]-1],
+                                    outline=(255, 0, 0), width=3)
+                    pdraw.text((p["x"]+6, p["y"]+6), f"{p['slot']}:{pos}", fill=(255, 0, 0), font=pfont)
+                desc = slot_desc(p["slot"])
+                if desc:
+                    panel_lines.append(f"**{pos} ({role_label(p['role'])}):** {desc}")
+
+            ref_block = ("### Reference Sheet Description\n" + "\n".join(panel_lines)
+                         if panel_lines else "### Reference Sheet Description\n")
+            gen_block = "### Target Description\n" + generated_video_action.strip()
+            full_prompt = ref_block.rstrip() + "\n\n" + gen_block
+            layout_map = self._render_layout_map_packed(placed, cw, ch)
+            return (_pil_to_tensor(canvas), full_prompt, ref_block, gen_block, CARD_NEGATIVE,
+                    _pil_to_tensor(preview), _pil_to_tensor(layout_map))
+
+        # ----------------------------------------------------------------- #
+        # TEMPLATE MODE (original fixed-rectangle behavior)
+        # ----------------------------------------------------------------- #
+        slots = self._resolve_layout(template, layout_json)
+
+        canvas = Image.new("RGB", (canvas_width, canvas_height), bg_rgb)
+        preview = canvas.copy()
+        draw = ImageDraw.Draw(preview)
+        font = _font(max(16, canvas_height // 40))
+
         ordered = sorted(slots, key=lambda s: (round(s["y"], 3), round(s["x"], 3)))
 
         panel_lines = []
@@ -243,14 +388,30 @@ class IngredientsSheetBuilder:
 
         reference_sheet_prompt = ref_block
         generated_video_prompt = "### Target Description\n" + generated_video_action.strip()
+        full_prompt = reference_sheet_prompt.rstrip() + "\n\n" + generated_video_prompt
 
         layout_map = self._render_layout_map(slots, canvas_width, canvas_height)
 
         return (
             _pil_to_tensor(canvas),
+            full_prompt,
             reference_sheet_prompt,
             generated_video_prompt,
             CARD_NEGATIVE,
             _pil_to_tensor(preview),
             _pil_to_tensor(layout_map),
         )
+
+    def _render_layout_map_packed(self, placed, w, h):
+        """Diagram for packed modes: colored rects at their packed positions."""
+        img = Image.new("RGB", (max(1, w), max(1, h)), (24, 24, 28))
+        draw = ImageDraw.Draw(img)
+        f = _font(max(16, h // 30))
+        for p in placed:
+            col = _ROLE_COLORS.get(p.get("role", "element"), (110, 90, 130))
+            draw.rectangle([p["x"]+4, p["y"]+4, p["x"]+p["w"]-4, p["y"]+p["h"]-4],
+                           fill=col, outline=(230, 230, 230), width=2)
+            pos = position_name_packed(p, placed)
+            draw.multiline_text((p["x"]+12, p["y"]+12), f"#{p['slot']} {p.get('role','')}\n{pos}",
+                                fill=(245, 245, 245), font=f, spacing=3)
+        return img
