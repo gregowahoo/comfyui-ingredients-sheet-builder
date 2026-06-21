@@ -124,41 +124,53 @@ class IngredientsSheetBuilder:
                                             "and wrap, never cropped. Use the no-crop modes when "
                                             "keeping the whole character matters more than sheet shape."}),
                 "template": (TEMPLATE_NAMES + ["Custom"], {"default": TEMPLATE_NAMES[0],
-                              "tooltip": "Used when layout_mode = Template."}),
+                              "label": "[GRID] template",
+                              "tooltip": "Used when layout_mode = Template (fixed grid)."}),
                 "canvas_width": ("INT", {"default": 1920, "min": 64, "max": 8192, "step": 8,
+                                         "label": "canvas_width  (GRID: exact / NO-CROP: max width)",
                                          "tooltip": "Template mode: exact canvas size (match output res). "
                                                     "No-crop modes: used as the max width before wrapping."}),
                 "canvas_height": ("INT", {"default": 1080, "min": 64, "max": 8192, "step": 8,
+                                          "label": "[GRID] canvas_height",
                                           "tooltip": "Template mode: exact canvas height. "
                                                      "No-crop modes: ignored (height grows to fit)."}),
                 "row_target_height": ("INT", {"default": 560, "min": 64, "max": 4096, "step": 8,
+                                              "label": "[NO-CROP] row_target_height",
                                               "tooltip": "No-crop modes only: height each image/row is "
                                                          "scaled to. Bigger = larger panels + taller sheet."}),
-                "background_color": (["black", "white"], {"default": "black"}),
+                "background_color": (["black", "white"], {"default": "black", "label": "background_color  (all modes)"}),
                 "fit_mode": (["crop_fill", "fit_pad"], {"default": "crop_fill",
+                              "label": "[GRID] fit_mode",
                               "tooltip": "Template mode only. crop_fill fills panels (may crop); "
                                          "fit_pad shows whole image with padding. No-crop modes "
                                          "ignore this (they never crop)."}),
                 "panel_gap": ("INT", {"default": 0, "min": 0, "max": 128, "step": 1,
+                                      "label": "panel_gap  (all modes)",
                                       "tooltip": "Gap between panels in pixels."}),
                 "generated_video_action": ("STRING", {
                     "multiline": True,
                     "default": "the character walks forward through the scene, cinematic lighting",
-                    "tooltip": "Action text for the 'Generated video:' prompt part.",
+                    "label": "generated_video_action  (all modes)",
+                    "tooltip": "Action text for the '### Target Description' prompt part.",
                 }),
                 "preview_labels": ("BOOLEAN", {"default": False,
+                                               "label": "preview_labels  (all modes)",
                                                "tooltip": "Draw panel numbers on a SEPARATE preview image. "
                                                           "Never baked into the sheet you feed the LoRA."}),
                 "row_assignment": ("STRING", {
                     "default": "1,2,3 | 0",
-                    "tooltip": "Auto-fit rows mode only. Group image slots into rows with commas, "
-                               "separate rows with '|'. 0 = the background/location input. "
-                               "Example '1,2,3 | 4,5 | 0' = chars row, more chars, location row."}),
+                    "label": "[AUTO-FIT ROWS] row_assignment",
+                    "tooltip": "Auto-fit rows mode only. List EVERY image you want shown — anything "
+                               "not listed is skipped. Commas group a row, '|' starts a new row. "
+                               "0 = location (optional if location_full_width is on). "
+                               "Example: '1,2,3,4,5' or '1,2,3 | 4,5'."}),
                 "location_full_width": ("BOOLEAN", {"default": True,
+                                "label": "[NO-CROP] location_full_width",
                                 "tooltip": "No-crop modes: always span the background/location image "
                                            "across the full width of the sheet as its own band, no "
                                            "matter how many other images. Ignored in Template mode."}),
                 "location_band_position": (["bottom", "top"], {"default": "bottom",
+                                "label": "[NO-CROP] location_band_position",
                                 "tooltip": "Where the full-width location band sits when "
                                            "location_full_width is on."}),
                 "layout_json": ("STRING", {
@@ -168,6 +180,7 @@ class IngredientsSheetBuilder:
                                 '  {"slot": 1, "x": 0.0, "y": 0.0, "w": 0.5, "h": 0.55, "role": "character"},\n'
                                 '  {"slot": 2, "x": 0.5, "y": 0.0, "w": 0.5, "h": 0.55, "role": "character"}\n'
                                 ']'),
+                    "label": "[GRID: Custom] layout_json",
                     "tooltip": "Used only when template = Custom (Template mode). Normalized (0-1) rects.",
                 }),
             },
