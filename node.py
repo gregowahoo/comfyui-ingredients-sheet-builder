@@ -158,12 +158,13 @@ class IngredientsSheetBuilder:
                                                "tooltip": "Draw panel numbers on a SEPARATE preview image. "
                                                           "Never baked into the sheet you feed the LoRA."}),
                 "row_assignment": ("STRING", {
-                    "default": "1,2,3 | 0",
-                    "label": "[AUTO-FIT ROWS] row_assignment",
-                    "tooltip": "Auto-fit rows mode only. List EVERY image you want shown — anything "
-                               "not listed is skipped. Commas group a row, '|' starts a new row. "
-                               "0 = location (optional if location_full_width is on). "
-                               "Example: '1,2,3,4,5' or '1,2,3 | 4,5'."}),
+                    "default": "",
+                    "label": "[AUTO-FIT ROWS] row_assignment (optional)",
+                    "tooltip": "Auto-fit rows mode: OPTIONAL grouping of images into rows. "
+                               "Commas group a row, '|' starts a new row, e.g. '1,2,3 | 4,5'. "
+                               "Leave BLANK to put all wired images in one row. Any wired image "
+                               "you don't list is added automatically — nothing is ever skipped. "
+                               "Location spans full-width separately when location_full_width is on."}),
                 "location_full_width": ("BOOLEAN", {"default": True,
                                 "label": "[NO-CROP] location_full_width",
                                 "tooltip": "No-crop modes: always span the background/location image "
@@ -266,9 +267,12 @@ class IngredientsSheetBuilder:
                 placed, cw, ch = free_pack(items, target_h=row_target_height,
                                            max_width=canvas_width, gap=gap)
             else:
-                # Auto-fit rows: parse row_assignment like "1,2,3 | 0"
+                # Auto-fit rows: parse row_assignment like "1,2,3 | 4,5".
+                # Track which slots got placed so we can auto-append any wired
+                # image the user forgot to list (no image silently disappears).
                 rows_items = []
-                spec = row_assignment.strip() or "1,2,3 | 0"
+                listed = set()
+                spec = row_assignment.strip() or "1,2,3"
                 for chunk in spec.split("|"):
                     row = []
                     for tok in chunk.split(","):
@@ -276,6 +280,7 @@ class IngredientsSheetBuilder:
                         if not (tok.lstrip("-").isdigit()):
                             continue
                         sid = int(tok)
+                        listed.add(sid)
                         if sid == 0 and span_location:
                             continue  # handled as full-width band below
                         im = slot_image(sid)
@@ -283,6 +288,17 @@ class IngredientsSheetBuilder:
                             row.append((sid, slot_role(sid), im))
                     if row:
                         rows_items.append(row)
+                # auto-include any wired image NOT mentioned in row_assignment,
+                # so nothing vanishes just because it wasn't listed.
+                leftovers = []
+                for i in range(1, MAX_SLOTS + 1):
+                    if i in listed:
+                        continue
+                    im = slot_image(i)
+                    if im is not None:
+                        leftovers.append((i, slot_role(i), im))
+                if leftovers:
+                    rows_items.append(leftovers)
                 # if nothing left (e.g. only bg), give a minimal width to anchor the band
                 if rows_items:
                     placed, cw, ch = autofit_rows(rows_items, row_height=row_target_height,

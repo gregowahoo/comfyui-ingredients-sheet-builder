@@ -43,6 +43,22 @@ part T2I sheet makers don't give you.
 
 ---
 
+## Quick start
+
+1. Wire your character images into `image_1`, `image_2`, ... and your location into
+   `background`.
+2. Caption each one (a `TextGenerate` per image into the matching `desc_*`), or just
+   type a short description in each `desc_*` field.
+3. Set `layout_mode` to **Auto-fit rows (no crop)** and leave `row_assignment`
+   **blank** — every image you wired will show, nothing cropped, location spanning
+   the full width.
+4. Wire `sheet_image` → your reference path, `full_prompt` → positive text encode,
+   `negative_prompt` → negative text encode. Run.
+
+That's the whole loop. Everything below is detail and customization.
+
+---
+
 ## Layout modes
 
 Set `layout_mode`:
@@ -50,9 +66,11 @@ Set `layout_mode`:
 - **Template (fixed grid)** — pick one of 10 presets (or `Custom` JSON) of fixed
   rectangles. Images fit into panels via `crop_fill` (fills the panel, may crop) or
   `fit_pad` (whole image, padded). Exact and grid-like; can crop tall images.
-- **Auto-fit rows (no crop)** — images keep native aspect and are laid out in rows
-  you define with `row_assignment` (e.g. `1,2,3`). All images in a row share a
-  height; the sheet size adapts. **Nothing is ever cropped.**
+- **Auto-fit rows (no crop)** — images keep native aspect and are laid out in rows.
+  Just wire your images and they all appear; the sheet size adapts. **Nothing is
+  ever cropped, and nothing is ever skipped** — any wired image shows up whether or
+  not you mention it in `row_assignment`. Use `row_assignment` only if you *want* to
+  control which images share a row (e.g. `1,2,3 | 4,5`); leave it blank for one row.
 - **Free pack (no crop)** — images keep native aspect and flow left-to-right,
   wrapping to new rows automatically. **Nothing is ever cropped.**
 
@@ -80,7 +98,7 @@ Wire the `layout_map` output to a Preview Image node to see any layout after a r
 | `panel_gap` | Pixels between panels |
 | `generated_video_action` | The action text for the `### Target Description` |
 | `preview_labels` | Draw panel numbers on a **separate** preview image only |
-| `row_assignment` | Auto-fit rows mode: group slots into rows, e.g. `1,2,3 | 4,5`. `0` = location |
+| `row_assignment` | Auto-fit rows mode: **optional** row grouping, e.g. `1,2,3 | 4,5`. Leave blank for one row. Any wired image not listed is added automatically — nothing is skipped |
 | `location_full_width` | No-crop modes (default ON): location always spans the full sheet width as its own band |
 | `location_band_position` | `bottom` or `top` for that band |
 | `layout_json` | Used only when `template = Custom` |
