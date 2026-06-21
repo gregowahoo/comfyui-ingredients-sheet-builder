@@ -3,152 +3,169 @@
 **The missing prep step for the [LTX-2.3 IC-LoRA Ingredients](https://huggingface.co/Lightricks/LTX-2.3-22b-IC-LoRA-Ingredients) workflow.**
 
 The Ingredients model conditions video generation on a *reference sheet* — a single
-composite image with one clean panel per visual element (each character as a
-face + turnaround, each prop, and one location panel) on a black background with
-no text — **plus** a two-part prompt that describes those panels:
+composite image with one clean panel per visual element (character turnarounds, a
+face, props, and a location panel) on a black background with no text — **plus** a
+two-part prompt that describes those panels in a specific trained format:
 
 ```
-Reference sheet: <descriptions of the panels>
-Generated video: <the action you want>
+### Reference Sheet Description
+**Top Row Left (Character):** <description>
+**Full Width Bottom (Setting):** <description>
+
+### Target Description
+<the action you want>
 ```
 
 Most people build that sheet with a flat text-to-image generator (e.g. Ideogram),
-which is T2I-only, can't use your *existing* character images or generations,
-bakes in text, and won't touch NSFW. **This node builds the sheet from your own
-images or generation branches, lays them out per the model's guidance, and emits
-the trained-format prompt strings** — the part T2I sheet makers don't give you.
+which is T2I-only, can't use your *existing* character images or generations, bakes
+in text, and won't touch NSFW. **This node builds the sheet from your own images,
+lays them out so nothing gets cropped, and emits the trained-format prompt** — the
+part T2I sheet makers don't give you.
 
-> Node category: **Ingredients/** — the first of a planned mini-suite.
+> Node category: **Ingredients/**
 
 ---
 
 ## What it does
 
-- Composites a reference sheet onto a **black canvas** (default 1920×1080; set it to match your output video resolution — reference downscale factor is 1), **no baked text**.
-- 10 **role-aware layout templates** — location and primary-character panels get the
-  most space, because the model card says *"bigger panels carry over better."*
-- A **Custom** template that reads a normalized-rect layout JSON, so you can size
-  every panel by importance yourself.
-- A dedicated **background/location** input (slot 0) for the environment panel.
-- A **modular vision backend** to auto-caption each panel (or type descriptions yourself).
-- Outputs both prompt parts ready to wire into the LTX text encoder, plus the
-  card's recommended **negative prompt**.
+- Composites a reference sheet from your images onto a **black, text-free canvas**.
+- Three **layout modes**: a fixed-grid template system, plus two **no-crop** modes
+  that keep every image's native shape so a full-body character is never truncated.
+- The **location/background always spans the full width** of the sheet as its own
+  band (optional, on by default) — even with just one other image.
+- Assembles the prompt in the trained **positional format** (`**Top Row Left
+  (Character):** ...`), computed from where each panel actually lands.
+- Auto-captions are **external**: wire a `TextGenerate` (or any text source) per
+  panel, or just type descriptions. Nothing is captioned inside this node, so it's
+  small, debuggable, and NSFW-safe with a local captioner.
+- Emits a single ready-to-use **`full_prompt`** (reference + target, correctly
+  spaced) so you wire one output straight into the text encoder.
 
 ---
 
-## Layout templates
+## Layout modes
 
-See `layout_templates_reference.png` for a visual map of all 10 presets (panel positions, slot numbers, and roles). Wire the node's `layout_map` output to a Preview Image node to see the currently-selected layout after a run.
+Set `layout_mode`:
 
-## Layout modes (V2.1)
-
-The node has three `layout_mode` options:
-
-- **Template (fixed grid)** — pick a preset (or Custom JSON) of fixed rectangles.
-  Images are fit into panels with `crop_fill` (fills, may crop) or `fit_pad`
-  (whole image, padded). Exact, grid-like; can crop tall images.
-- **Auto-fit rows (no crop)** — images keep their native aspect ratio and are
-  laid out in rows you define via `row_assignment` (e.g. `1,2,3 | 0` = images
-  1-3 on one row, the location/background on the next). All images in a row share
-  a height; the sheet width/height adapt. **Nothing is ever cropped.**
+- **Template (fixed grid)** — pick one of 10 presets (or `Custom` JSON) of fixed
+  rectangles. Images fit into panels via `crop_fill` (fills the panel, may crop) or
+  `fit_pad` (whole image, padded). Exact and grid-like; can crop tall images.
+- **Auto-fit rows (no crop)** — images keep native aspect and are laid out in rows
+  you define with `row_assignment` (e.g. `1,2,3`). All images in a row share a
+  height; the sheet size adapts. **Nothing is ever cropped.**
 - **Free pack (no crop)** — images keep native aspect and flow left-to-right,
   wrapping to new rows automatically. **Nothing is ever cropped.**
 
-Use the no-crop modes when keeping the *whole* character visible matters more
-than the sheet being a tidy rectangle — the IC-LoRA model only needs to see each
-element clearly. `row_target_height` controls how big the panels (and sheet) are.
+Use the no-crop modes when keeping the *whole* character visible matters more than
+the sheet being a tidy rectangle — the IC-LoRA model just needs to see each element
+clearly. `row_target_height` controls how big the panels (and the sheet) are.
+
+See `layout_templates_reference.png` for a visual map of the 10 fixed templates.
+Wire the `layout_map` output to a Preview Image node to see any layout after a run.
+
+---
 
 ## Inputs
 
 **Required**
+
 | Widget | Notes |
 |---|---|
-| `template` | One of 10 presets, or `Custom` |
-| `canvas_width` / `canvas_height` | Default 768×448 (trained bucket) |
+| `layout_mode` | `Template (fixed grid)` / `Auto-fit rows (no crop)` / `Free pack (no crop)` |
+| `template` | One of 10 presets, or `Custom` (Template mode only) |
+| `canvas_width` / `canvas_height` | Template mode: exact size (match output res). No-crop modes: `canvas_width` is the max width before wrapping; height grows to fit |
+| `row_target_height` | No-crop modes: height each image/row is scaled to. Bigger = larger panels + taller sheet |
 | `background_color` | `black` (IC-LoRA spec) or `white` |
-| `fit_mode` | `crop_fill` (uniform, crops overflow) or `fit_pad` (whole image, bars) |
-| `panel_gap` | Pixels between panels — **keep 0 for IC-LoRA** |
-| `vision_backend` | `none` / `ollama` / `openai_compatible` / `gemini` / `anthropic` |
-| `vision_model` | e.g. `llava`, `qwen2-vl`, `gpt-4o-mini`, `gemini-2.0-flash` |
-| `vision_base_url` | Ollama root, or an OpenAI-compatible `/v1` root |
-| `vision_api_key` | Blank for local Ollama |
-| `caption_prompt` | Instruction sent to the vision model per panel |
-| `generated_video_action` | The action text for `Generated video:` |
+| `fit_mode` | Template mode only. `crop_fill` (fills, may crop) or `fit_pad` (whole image, padded) |
+| `panel_gap` | Pixels between panels |
+| `generated_video_action` | The action text for the `### Target Description` |
 | `preview_labels` | Draw panel numbers on a **separate** preview image only |
+| `row_assignment` | Auto-fit rows mode: group slots into rows, e.g. `1,2,3 | 4,5`. `0` = location |
+| `location_full_width` | No-crop modes (default ON): location always spans the full sheet width as its own band |
+| `location_band_position` | `bottom` or `top` for that band |
 | `layout_json` | Used only when `template = Custom` |
 
 **Optional (image + description per slot)**
 - `background` (IMAGE) + `background_desc` (STRING) — the location panel (slot 0)
 - `image_1`..`image_9` (IMAGE) + `desc_1`..`desc_9` (STRING) — element panels
 
-For each panel the description is taken from the manual `desc_*` field if you
-filled it; otherwise the chosen vision backend captions the image. With
-`vision_backend = none`, only your manual descriptions are used.
+Each `desc_*` field can be **typed directly**, or you can wire a text source into
+it (right-click → Convert to input). Empty + no image = that panel is skipped.
 
 ## Outputs
 
 | Output | Use |
 |---|---|
 | `sheet_image` (IMAGE) | The black, text-free composite — feed this to the IC-LoRA reference path |
-| `reference_sheet_prompt` (STRING) | `Reference sheet: ...` — wire into your positive text |
-| `generated_video_prompt` (STRING) | `Generated video: ...` |
-| `negative_prompt` (STRING) | The card's recommended negative |
+| `full_prompt` (STRING) | **Reference + Target combined, correctly spaced — wire this one into your positive text encoder** |
+| `reference_sheet_prompt` (STRING) | Just the `### Reference Sheet Description` block, if you want it separate |
+| `generated_video_prompt` (STRING) | Just the `### Target Description` block |
+| `negative_prompt` (STRING) | The card's recommended negative prompt |
 | `labeled_preview` (IMAGE) | Same layout **with** panel numbers, for your eyes only — never feed this to the LoRA |
-| `layout_map` (IMAGE) | A diagram of the chosen template (numbered, colored panels) so you can see the layout |
+| `layout_map` (IMAGE) | A diagram of the chosen layout (numbered, colored panels) |
+
+For most setups: wire **`full_prompt` → positive CLIP Text Encode**, and
+**`negative_prompt` → negative CLIP Text Encode**. No concatenation needed.
 
 ---
 
-## Captioning (external — V2)
+## Captioning (external)
 
-V2 does **not** caption inside this node. You caption each panel **externally** and
-wire the resulting text into the `desc_*` inputs. This keeps the node small, makes
-each caption visible/debuggable on its own, and lets you use whatever captioner you
-like.
+This node does **not** caption internally. You caption each panel **externally** and
+the result flows into the `desc_*` inputs. This keeps the node small, makes each
+caption visible/debuggable on its own, and lets you use any captioner.
 
 Recommended: a **`TextGenerate`** node (from `comfyui-easy-use`) per panel, with a
-`CLIPLoader`/text-encoder loader pointed at a vision-capable model (e.g. a Gemma or
-Qwen-VL encoder you already use). Feed each panel image into a TextGenerate, wire its
-text output into the matching `desc_*` input. You can also just type a description, or
-leave a `desc_*` empty to skip that panel.
+`CLIPLoader` / text-encoder loader pointed at a vision-capable model (e.g. a Gemma
+or Qwen-VL encoder). Feed each panel image into a TextGenerate, wire its text output
+into the matching `desc_*` input. Connect the panel's image, or the model will
+hallucinate a description.
 
-> NSFW: because captioning is external and local (TextGenerate runs the model in
-> ComfyUI), there's no cloud filter to refuse explicit panels — use a local
-> vision-capable encoder.
+> NSFW: because captioning is external and local, there's no cloud filter to refuse
+> explicit panels — use a local vision-capable encoder.
 
 ## Custom layout JSON
 
-When `template = Custom`, `layout_json` is a list of slots. Coordinates are
-fractions of the canvas (0–1), so layouts are resolution-independent. `slot 0` is
-the background/location input.
+When `template = Custom` (Template mode), `layout_json` is a list of slots.
+Coordinates are fractions of the canvas (0–1), so layouts are resolution-independent.
+`slot 0` is the background/location input.
 
 ```json
 [
-  {"slot": 0, "x": 0.0,  "y": 0.0,  "w": 1.0,  "h": 1.0,  "role": "location"},
-  {"slot": 1, "x": 0.02, "y": 0.30, "w": 0.30, "h": 0.68, "role": "character"},
-  {"slot": 2, "x": 0.34, "y": 0.55, "w": 0.20, "h": 0.43, "role": "face"}
+  {"slot": 0, "x": 0.0,  "y": 0.55, "w": 1.0,  "h": 0.45, "role": "location"},
+  {"slot": 1, "x": 0.0,  "y": 0.0,  "w": 0.5,  "h": 0.55, "role": "character"},
+  {"slot": 2, "x": 0.5,  "y": 0.0,  "w": 0.5,  "h": 0.55, "role": "character"}
 ]
 ```
 
-`role` is informational (`location` / `character` / `face` / `prop` / `element`).
-Tip: give important elements the biggest rectangles — the model reproduces large
-panels more faithfully.
+`role` is one of `location` / `character` / `face` / `prop` / `element`, and feeds
+the parenthetical in the prompt (`(Setting)` / `(Character)` / etc.). Bigger
+rectangles reproduce more faithfully — give important elements more space.
 
 ---
 
 ## Wiring into the LTX IC-LoRA Ingredients workflow
 
 1. Build your panels — load existing images (`LoadImage`) or pipe in fresh
-   generations — into the slot inputs.
-2. `sheet_image` → the IC-LoRA **reference / control** input. The Ingredients
-   workflow loops the still into a static video; it must be **≥ 121 frames** at
-   the output resolution (768×448, 24 fps). Use the LTX repo's reference workflow
-   which already wires this.
-3. `reference_sheet_prompt` + `generated_video_prompt` → your text conditioning,
-   concatenated (or kept separate while you test).
+   generations — into the slot inputs. Caption them (TextGenerate or typed).
+2. `sheet_image` → the IC-LoRA **reference** input. The Ingredients workflow loops
+   the still into a static video; it must match the output frame count (e.g. set
+   `RepeatImageBatch` to your total frames, ≥ 121). The LTX repo's reference
+   workflow wires this for you.
+3. `full_prompt` → your positive text conditioning.
 4. `negative_prompt` → the negative conditioning.
-5. Recommended model settings from the card: **LoRA strength 1.4, 30 steps,
-   guidance 4.0**, base model **LTX-2.3-22B** + `ltx-2.3-22b-ic-lora-ingredients-0.9.safetensors`
-   in `models/loras`.
+5. Recommended settings from the card: **LoRA strength 1.4, 30 steps, guidance
+   4.0**, base **LTX-2.3-22B** + `ltx-2.3-22b-ic-lora-ingredients-0.9.safetensors`.
+
+Tips from working with it:
+- Open the action text with what's happening **from the first frame** (e.g.
+  "From the first frame she is already mid-stride...") to avoid a hologram/garbled
+  "settling" intro.
+- For a single-character sheet, keep any other person off-frame in the action — the
+  model can render a malformed second figure if you describe one that isn't in the
+  sheet.
+- Run sheet prep (captioning) and the heavy LTX render **separately** — both load
+  large models; don't hold both at once on 16GB VRAM.
 
 > The Ingredients model is gated on Hugging Face — log in and click **Agree and
 > Access** to download the weights.
@@ -159,8 +176,7 @@ panels more faithfully.
 
 ```
 cd ComfyUI/custom_nodes
-git clone <your-repo-url> comfyui-ingredients-sheet-builder
-# or copy this folder in
+git clone https://github.com/gregowahoo/comfyui-ingredients-sheet-builder
 pip install -r comfyui-ingredients-sheet-builder/requirements.txt
 ```
 Restart ComfyUI. Find **Ingredients Sheet Builder** under the **Ingredients/**
@@ -168,5 +184,6 @@ category.
 
 ## License / credits
 
-Built to pair with Lightricks' LTX-2.3 IC-LoRA Ingredients. Respect the
-LTX-2-community-license for the model weights.
+MIT (see LICENSE). Built to pair with Lightricks' LTX-2.3 IC-LoRA Ingredients. This
+project includes no model weights; the LTX-2.3 model and its IC-LoRA are governed by
+the LTX-2-community-license — obtain and use those separately under their own terms.
