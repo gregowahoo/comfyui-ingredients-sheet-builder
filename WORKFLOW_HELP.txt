@@ -1,0 +1,94 @@
+============================================================
+ INGREDIENTS SHEET BUILDER - QUICKSTART
+============================================================
+
+WHAT THIS DOES
+Builds an LTX-2.3 IC-LoRA "Ingredients" reference sheet from YOUR
+images, laid out like Lightricks' own example sheets, and outputs the
+panel descriptions as clean prose. No Ideogram needed.
+
+SETUP
+1. Wire your character/prop images into image_1, image_2, ... and your
+   location/setting into "location_image".
+2. For each panel, fill in:
+     - id_N    : a NAME (e.g. "Lily"). Give the SAME name to every panel
+                 that shows the same character.
+     - desc_N  : a short description of that panel (type it, or wire a
+                 captioner/Generate Text node in).
+3. Set "location_position" to top or bottom.
+4. Wire "sheet_image" -> your LTX reference input.
+5. Run.
+
+TO LEAVE AN IMAGE OFF THE SHEET
+Mute its Load Image node (Ctrl-M). Whatever is wired in appears;
+whatever isn't, doesn't. There's no list to manage.
+
+WHY THE IDs MATTER
+If three panels all show Lily, put "Lily" in id_1, id_2, id_3. The
+prompt then names Lily on every one of her panels, so the model reads
+them as ONE person instead of three different-looking women. Give the
+location its own id (e.g. "the atrium") or leave it blank.
+
+============================================================
+ ALL FIELDS
+============================================================
+
+--- SETTINGS ---
+output_width      : sheet width. Default 1456 (matches the example sheets).
+output_height     : sheet height. Default 825 (~16:9 with the width).
+location_position : put the full-width location band at top or bottom.
+panel_gap         : black gutter (px) between panels, between the rows,
+                    and around the whole sheet. Default 12.
+show_panel_numbers: draw panel numbers on labeled_preview (never on the
+                    real sheet).
+
+--- INPUTS ---
+location_image    : the location/setting (spans full width as a band)
+location_id       : name for the location (optional)
+location_desc     : description of the location
+image_1..image_6  : your character/prop images
+id_1..id_6        : NAME for each panel (same name = same character)
+desc_1..desc_6    : description of each panel
+
+--- OUTPUTS ---
+sheet_image            : the reference sheet -> feed to your LTX reference input
+reference_sheet_prompt : the panel descriptions as clean semicolon prose
+labeled_preview        : the sheet WITH panel numbers (your eyes only, never to LTX)
+
+--- HOW THE LAYOUT WORKS ---
+Character/prop panels go in ONE row across the top, each shown WHOLE at
+its true shape - never cropped, never squished. With 4-5 panels the row
+fills the width edge-to-edge. The location image spans the full width as
+its own band. Uniform black gutters separate everything and frame the
+sheet, matching the official example sheets.
+
+NOTE ON SIZE: the sheet (1456x825) is BIGGER than the output video
+(~768x448). The reference sheet is larger on purpose and gets downscaled
+in the pipeline - bigger panels carry more detail and avoid seam/banding
+artifacts. Don't shrink the sheet to the video size.
+
+============================================================
+ BUILDING THE FINAL PROMPT
+============================================================
+
+The action prose and the captioning system prompt are NOT in this node -
+keep each in its own Text node so you can edit them freely.
+
+1. A Text node holding your CAPTIONING SYSTEM PROMPT (the instructions for
+   the AI that writes the action). A starting template is in the comment
+   at the top of node.py; it ends with "ACTION IDEA: ".
+2. A Text node holding your ACTION IDEA (e.g. "Lily sings, happy").
+3. Concatenate system-prompt + action-idea -> feed to your Generate Text
+   node so it expands the action.
+4. Concatenate reference_sheet_prompt + the Generate Text output -> that's
+   the full prompt for LTX.
+
+For the NEGATIVE prompt, keep a small text node with:
+   worst quality, inconsistent motion, blurry, jittery, distorted
+
+TIPS
+- Bigger panels carry over better; give the main character the most space.
+- Keep the location image free of prominent people (they can bleed into
+  the character). Use the same id on all of a character's panels.
+- bypass_i2v = True is correct for Ingredients (the sheet is conditioning,
+  not a first frame).
