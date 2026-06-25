@@ -1,94 +1,64 @@
-============================================================
- INGREDIENTS SHEET BUILDER - QUICKSTART
-============================================================
+INGREDIENTS SHEET BUILDER - QUICK HELP
+======================================
+Build: 2026-06-25 #1  (location_height_percent + location_fit_bars)
 
-WHAT THIS DOES
-Builds an LTX-2.3 IC-LoRA "Ingredients" reference sheet from YOUR
-images, laid out like Lightricks' own example sheets, and outputs the
-panel descriptions as clean prose. No Ideogram needed.
+WHAT THIS NODE MAKES
+--------------------
+A single reference sheet for the LTX-2.3 IC-LoRA Ingredients model:
+  - A top ROW of character/prop panels (each shown whole, no crop, no squish)
+  - A full-width LOCATION band at the bottom (or top)
+  - Black background, even gaps - matches Lightricks' own example sheets
 
-SETUP
-1. Wire your character/prop images into image_1, image_2, ... and your
-   location/setting into "location_image".
-2. For each panel, fill in:
-     - id_N    : a NAME (e.g. "Lily"). Give the SAME name to every panel
-                 that shows the same character.
-     - desc_N  : a short description of that panel (type it, or wire a
-                 captioner/Generate Text node in).
-3. Set "location_position" to top or bottom.
-4. Wire "sheet_image" -> your LTX reference input.
-5. Run.
+OUTPUTS
+-------
+  sheet_image             -> feed this to the Ingredients model
+  reference_sheet_prompt  -> the prose prompt for the sheet
+  labeled_preview         -> same sheet with labels, for your own checking
 
-TO LEAVE AN IMAGE OFF THE SHEET
-Mute its Load Image node (Ctrl-M). Whatever is wired in appears;
-whatever isn't, doesn't. There's no list to manage.
+THE SETTINGS YOU'LL TOUCH MOST
+------------------------------
+  output_width / output_height
+      Leave at 1456 x 825 (the on-spec sheet size). The output VIDEO is
+      smaller (~768x448); the pipeline downscales the bigger sheet.
 
-WHY THE IDs MATTER
-If three panels all show Lily, put "Lily" in id_1, id_2, id_3. The
-prompt then names Lily on every one of her panels, so the model reads
-them as ONE person instead of three different-looking women. Give the
-location its own id (e.g. "the atrium") or leave it blank.
+  location_height_percent   (default 40)
+      How much of the sheet height the LOCATION band gets.
+      Character row fills the rest. Bump UP if the location looks squished.
 
-============================================================
- ALL FIELDS
-============================================================
+  location_fit_bars         (default OFF)
+      OFF = location fills the band, crops its top/bottom if shapes differ.
+      ON  = whole location shown, black bars fill the leftover space.
+      Turn ON if a wide location (like a beach) is getting cut off.
 
---- SETTINGS ---
-output_width      : sheet width. Default 1456 (matches the example sheets).
-output_height     : sheet height. Default 825 (~16:9 with the width).
-location_position : put the full-width location band at top or bottom.
-panel_gap         : black gutter (px) between panels, between the rows,
-                    and around the whole sheet. Default 12.
-show_panel_numbers: draw panel numbers on labeled_preview (never on the
-                    real sheet).
+  panel_gap                 (default 12)
+      Black gap between panels and between the row and the location band.
+      Keep it > 0 so the model doesn't blend things or carry a seam line.
 
---- INPUTS ---
-location_image    : the location/setting (spans full width as a band)
-location_id       : name for the location (optional)
-location_desc     : description of the location
-image_1..image_6  : your character/prop images
-id_1..id_6        : NAME for each panel (same name = same character)
-desc_1..desc_6    : description of each panel
+COMMON FIX: BEACH / WIDE LOCATION GETTING CUT OFF
+-------------------------------------------------
+  1. Set location_height_percent to about 50
+  2. Turn location_fit_bars ON
+  -> the whole location shows, with black bars instead of a crop
 
---- OUTPUTS ---
-sheet_image            : the reference sheet -> feed to your LTX reference input
-reference_sheet_prompt : the panel descriptions as clean semicolon prose
-labeled_preview        : the sheet WITH panel numbers (your eyes only, never to LTX)
+DROPPING A PANEL
+----------------
+  Mute the Load Image node feeding that panel. The layout adjusts.
 
---- HOW THE LAYOUT WORKS ---
-Character/prop panels go in ONE row across the top, each shown WHOLE at
-its true shape - never cropped, never squished. With 4-5 panels the row
-fills the width edge-to-edge. The location image spans the full width as
-its own band. Uniform black gutters separate everything and frame the
-sheet, matching the official example sheets.
+NAMING A CHARACTER CONSISTENTLY
+-------------------------------
+  Use the id_1..id_6 fields (and location_id). The name is threaded through
+  the description so the same character is referred to the same way in every
+  panel.
 
-NOTE ON SIZE: the sheet (1456x825) is BIGGER than the output video
-(~768x448). The reference sheet is larger on purpose and gets downscaled
-in the pipeline - bigger panels carry more detail and avoid seam/banding
-artifacts. Don't shrink the sheet to the video size.
+LTX-2.3 FRAME COUNT REMINDER (24 fps)
+-------------------------------------
+  Frame count must be 8n+1 (e.g. 25, 49, 73, 97, 121, ... 241).
+  Quick map at 24 fps:  5s=121   8s=193   10s=241
+  Model is happiest UNDER 257 frames (~10.7s). Past ~12-15s, subjects can
+  drift toward center; render in shorter segments and extend instead.
 
-============================================================
- BUILDING THE FINAL PROMPT
-============================================================
-
-The action prose and the captioning system prompt are NOT in this node -
-keep each in its own Text node so you can edit them freely.
-
-1. A Text node holding your CAPTIONING SYSTEM PROMPT (the instructions for
-   the AI that writes the action). A starting template is in the comment
-   at the top of node.py; it ends with "ACTION IDEA: ".
-2. A Text node holding your ACTION IDEA (e.g. "Lily sings, happy").
-3. Concatenate system-prompt + action-idea -> feed to your Generate Text
-   node so it expands the action.
-4. Concatenate reference_sheet_prompt + the Generate Text output -> that's
-   the full prompt for LTX.
-
-For the NEGATIVE prompt, keep a small text node with:
-   worst quality, inconsistent motion, blurry, jittery, distorted
-
-TIPS
-- Bigger panels carry over better; give the main character the most space.
-- Keep the location image free of prominent people (they can bleed into
-  the character). Use the same id on all of a character's panels.
-- bypass_i2v = True is correct for Ingredients (the sheet is conditioning,
-  not a first frame).
+CONFIRMING YOU HAVE THE RIGHT VERSION
+-------------------------------------
+  Watch the ComfyUI startup console for:
+      [Ingredients Sheet Builder] loaded build: 2026-06-25 #1 ...
+  Or open node.py and read the NODE_BUILD line near the top.

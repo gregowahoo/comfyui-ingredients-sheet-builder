@@ -33,6 +33,13 @@ import numpy as np
 import torch
 from PIL import Image, ImageDraw, ImageFont
 
+# ---------------------------------------------------------------------------
+# BUILD STAMP - bump this whenever the file changes so you can tell at a glance
+# (and in the ComfyUI startup console) which copy is loaded.
+# ---------------------------------------------------------------------------
+NODE_BUILD = "2026-06-25 #1  (location_height_percent + location_fit_bars)"
+print(f"[Ingredients Sheet Builder] loaded build: {NODE_BUILD}")
+
 MAX_PANELS = 6  # characters / props (slot 0 is the location, handled separately)
 CARD_NEGATIVE = "worst quality, inconsistent motion, blurry, jittery, distorted"  # reference only; not output
 
