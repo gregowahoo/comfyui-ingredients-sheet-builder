@@ -1,7 +1,7 @@
 [project]
 name = "comfyui-ingredients-sheet-builder"
 description = "Build LTX-2.3 IC-LoRA Ingredients reference sheets (whole panels on black, uniform gutters) and clean semicolon-prose descriptions, in ComfyUI."
-version = "3.0.0"
+version = "4.0.0"
 license = { file = "LICENSE" }
 readme = "README.md"
 requires-python = ">=3.10"

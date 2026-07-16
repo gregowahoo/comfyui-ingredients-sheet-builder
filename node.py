@@ -1,30 +1,32 @@
 """
-Ingredients Sheet Builder (V3 - clean rewrite)
-================================================
+Ingredients Sheet Builder (V4)
+================================
 
 One job: take your reference images and build a single composite reference
 sheet for the LTX-2.3 IC-LoRA Ingredients model.
 
-How it lays out the sheet (no modes, no choices to get wrong):
+How it lays out the sheet:
   - Every CHARACTER/PROP image you wire in is placed in ONE row across the top,
     shown WHOLE at its true aspect ratio (never cropped, never squished).
   - Panels sit centered on a black background, which is the layout the model
     card specifies ("clean panels on a black background, no text").
   - The LOCATION image spans the full width as its own band, placed at the top
     or the bottom (your choice).
-  - To leave an image OUT of the sheet, just disable/mute its Load Image node.
-    Whatever is wired in, appears. Whatever isn't, doesn't.
+  - To leave an image OUT of the sheet, simply don't wire it in (or mute its
+    Load Image node). Whatever is wired in appears; empty slots are skipped.
 
 Default sheet size is ~1456x825, matching Lightricks' own example sheets.
 Bigger sheets give each panel more detail and downscale cleanly into the
 pipeline; the output video itself is smaller (~768x448).
 
 Outputs:
-  - sheet_image  : the composite sheet (wire to your loop-to-video / IC-LoRA ref)
-  - reference_sheet_prompt : the "### Reference Sheet Description" panel text
-  - reference_sheet_prompt : the panel descriptions as clean semicolon prose
-  - labeled_preview : same sheet with panel numbers drawn on (for your eyes only;
-                      never feed this to the model)
+  - sheet_image             : the composite sheet (wire to your IC-LoRA ref)
+  - labeled_preview         : same sheet with panel numbers drawn on (for your
+                              eyes only; never feed this to the model)
+  - video_prompt_template   : "Reference sheet: {descriptions}\n\nGenerated video: "
+                              ready to concatenate LLM output after it
+  - llm_prompt              : system_prompt + action_idea, wire to a Generate
+                              Text node to produce the final action description
 
 Wire a caption per panel into the desc_* inputs (type it, or wire a text node).
 """
@@ -37,27 +39,21 @@ from PIL import Image, ImageDraw, ImageFont
 # BUILD STAMP - bump this whenever the file changes so you can tell at a glance
 # (and in the ComfyUI startup console) which copy is loaded.
 # ---------------------------------------------------------------------------
-NODE_BUILD = "2026-06-25 #1  (location_height_percent + location_fit_bars)"
+NODE_BUILD = "2026-06-27 #8  (1536x896 default, improved tooltips, LoRA scale tip)"
 print(f"[Ingredients Sheet Builder] loaded build: {NODE_BUILD}")
 
-MAX_PANELS = 6  # characters / props (slot 0 is the location, handled separately)
-CARD_NEGATIVE = "worst quality, inconsistent motion, blurry, jittery, distorted"  # reference only; not output
-
+MAX_PANELS = 8  # characters / props (location is handled separately as a fixed input)
 
 # Default sheet size. NOTE: the model's *output video* bucket is 768x448, but
 # Lightricks' own example reference SHEETS are larger (~1456x825) — bigger sheets
 # give each panel more detail and downscale cleanly into the pipeline, which
 # avoids the faint seam/banding artifacts seen with cramped small sheets. So the
 # sheet default is the larger size; it is downscaled to the output res downstream.
-SPEC_W, SPEC_H = 1456, 825
+SPEC_W, SPEC_H = 1536, 896
 
-# Default standing instructions for the captioning/LLM node that writes the
-# Target Description. Editable on the node and exposed as an output socket.
-# Reference system-prompt text for the captioning/LLM node that writes the action
-# prose. This is NOT used by the node anymore — keep the system prompt in its own
-# Text node in your workflow (so you can edit it freely over time) and wire it into
-# your Generate Text node. Paste this as a starting point. Your action_idea text is
-# appended after the "ACTION IDEA: " label at the end.
+# Starter system prompt for the captioning/LLM node that writes the action prose.
+# Exposed as an output socket so you can wire it directly into a Generate Text node.
+# Your action_idea text should be appended after "ACTION IDEA: " at the end.
 DEFAULT_SYSTEM_PROMPT = (
     "You are writing the action/video prompt (the motion description) "
     "for an LTX-2.3 IC-LoRA Ingredients video.\n\n"
@@ -209,29 +205,19 @@ def _fit_bars(img, w, h):
     return out
 
 
-def _pos_label(i, n):
-    """Human-readable position name for the prompt, e.g. 'Top Row Left'."""
-    if n == 1:
-        return "Top Row Center"
-    if i == 0:
-        return "Top Row Far Left"
-    if i == n - 1:
-        return "Top Row Far Right"
-    if n == 2:
-        return "Top Row Left" if i == 0 else "Top Row Right"
-    if i == 1:
-        return "Top Row Left"
-    if i == n - 2:
-        return "Top Row Right"
-    return f"Top Row Middle {i}"
-
 
 class IngredientsSheetBuilder:
     @classmethod
     def INPUT_TYPES(cls):
         optional = {
             "location_image": ("IMAGE", {"tooltip": "The location / environment / set. "
-                                         "Spans the full width as its own band."}),
+                                         "Spans the full width as its own band. "
+                                         "Leave unconnected to omit the location band."}),
+            "enable_location": ("BOOLEAN", {"default": True,
+                                "label": "━━━━━  LOCATION  ━━━━━   enable",
+                                "tooltip": "ON: include the location band. OFF: drop it and let the "
+                                           "character row fill the whole sheet — without unplugging "
+                                           "the location image."}),
             "location_height_percent": ("INT", {"default": 40, "min": 10, "max": 80, "step": 5,
                                         "tooltip": "How much of the sheet height the location band "
                                                    "gets (the character row fills the rest). Higher = "
@@ -245,33 +231,47 @@ class IngredientsSheetBuilder:
                                              "if your location (e.g. a wide beach) is getting "
                                              "its top and bottom cut off."}),
             "location_id": ("STRING", {"default": "",
+                            "label": "location  ·  id (name)",
                             "tooltip": "Optional name/ID for the location (e.g. 'the Aeterna atrium'). "
                                        "Threaded through the description so it's referred to consistently."}),
             "location_desc": ("STRING", {"multiline": True, "default": "",
-                              "tooltip": "Description of the location panel."}),
+                              "label": "location  ·  description",
+                              "tooltip": "Description of the location/setting panel. Include the "
+                                         "environment, atmosphere, lighting, and time of day "
+                                         "(e.g. 'a cobblestone alley at night, wet pavement "
+                                         "reflecting warm streetlights, fog rolling in'). "
+                                         "Never describe people in the background — location only."}),
         }
         for i in range(1, MAX_PANELS + 1):
             optional[f"image_{i}"] = ("IMAGE", {"tooltip": f"Character or prop {i}. "
-                                     f"To leave it out, mute its Load Image node."})
+                                     f"Leave unconnected to skip this slot — the row reflows automatically."})
             optional[f"id_{i}"] = ("STRING", {"default": "",
+                                   "label": f"panel {i}  ·  id (name)",
                                    "tooltip": f"Name/ID for panel {i} (e.g. 'Lily'). Give the SAME "
                                               f"name to every panel that shows the same character, so "
                                               f"all panels describe ONE consistent identity instead of "
-                                              f"separate people. Used to tag the description and to tell "
-                                              f"the captioner who this is."})
+                                              f"separate people."})
             optional[f"desc_{i}"] = ("STRING", {"multiline": True, "default": "",
-                                     "tooltip": f"Description of panel {i}. If an ID is set, the "
-                                                f"description is threaded with that name."})
+                                     "label": f"panel {i}  ·  description",
+                                     "tooltip": f"Description of panel {i}. Include: appearance "
+                                                f"details (hair, skin, clothing, features) AND the "
+                                                f"shot/angle shown (e.g. 'face close-up', 'full-body "
+                                                f"turnaround', 'side profile'). The model reads both "
+                                                f"to lock in identity and understand what each panel "
+                                                f"contributes. If an ID is set, it is threaded in."})
         return {
             "required": {
+                "num_panels": ("INT", {"default": 4, "min": 1, "max": MAX_PANELS, "step": 1,
+                               "tooltip": f"How many character/prop panel slots are active (1–{MAX_PANELS}). "
+                                          "Slots above this number are ignored even if wired."}),
                 "output_width": ("INT", {"default": SPEC_W, "min": 64, "max": 4096, "step": 8,
-                                 "tooltip": "Sheet width. Default 1456 matches Lightricks' own "
-                                            "example sheets. Bigger sheets give each panel more "
-                                            "detail and downscale cleanly (the output VIDEO is "
-                                            "smaller, ~768x448). Keep the ~16:9 ratio."}),
+                                 "tooltip": "Sheet width. Default 1536 matches the official "
+                                            "Lightricks compose_sheet canvas. Bigger sheets give "
+                                            "each panel more detail and downscale cleanly — the "
+                                            "output VIDEO is only 768x448. Keep the ~16:9 ratio."}),
                 "output_height": ("INT", {"default": SPEC_H, "min": 64, "max": 4096, "step": 8,
-                                  "tooltip": "Sheet height. Default 825 (matches the example "
-                                             "sheets, ~16:9 with the width)."}),
+                                  "tooltip": "Sheet height. Default 896 (matches the official "
+                                             "Lightricks canvas, 1536x896, ~16:9)."}),
                 "location_position": (["bottom", "top"], {"default": "bottom",
                                       "tooltip": "Put the full-width location band at the "
                                                  "bottom or top of the sheet."}),
@@ -283,34 +283,51 @@ class IngredientsSheetBuilder:
                 "show_panel_numbers": ("BOOLEAN", {"default": False,
                                        "tooltip": "Draw panel numbers on the labeled_preview output "
                                                   "(never on the real sheet)."}),
+                "system_prompt": ("STRING", {"multiline": True, "default": DEFAULT_SYSTEM_PROMPT,
+                                  "tooltip": "System prompt for your LLM/caption node. Wires to the "
+                                             "'system' input of a Generate Text node. Edit freely."}),
+                "action_idea": ("STRING", {"multiline": True,
+                                "default": "(describe what you want to happen in the video)",
+                                "tooltip": "What you want to happen in the video. Be as specific as "
+                                           "you like — one line or a full paragraph. The LLM will "
+                                           "expand it into a cinematic description. This is appended "
+                                           "after 'ACTION IDEA:' in the system prompt and output as "
+                                           "llm_prompt, ready to wire to a Generate Text node. "
+                                           "Examples: 'she walks into the bar and orders a drink', "
+                                           "'he fights three guards on a rooftop at sunset'."}),
             },
             "optional": optional,
         }
 
-    RETURN_TYPES = ("IMAGE", "STRING", "IMAGE")
-    RETURN_NAMES = ("sheet_image", "reference_sheet_prompt", "labeled_preview")
+    RETURN_TYPES = ("IMAGE", "IMAGE", "STRING", "STRING")
+    RETURN_NAMES = ("sheet_image", "labeled_preview", "video_prompt_template", "llm_prompt")
     FUNCTION = "build"
     CATEGORY = "Ingredients"
     DESCRIPTION = ("Builds a single LTX-2.3 IC-LoRA Ingredients reference sheet: character/prop "
                    "panels in a top row at native shape (no crop, no black bars), plus a "
-                   "full-width location band. Mute a Load Image node to drop that panel.")
+                   "full-width location band. Mute a Load Image node to drop that panel. "
+                   "Tip: the official Ingredients LoRA runs best at strength 1.4.")
 
     def build(self, output_width, output_height, location_position, panel_gap,
-              show_panel_numbers, location_height_percent=40,
-              location_fit_bars=False, **kwargs):
+              show_panel_numbers, system_prompt, action_idea, num_panels=4,
+              location_height_percent=40, location_fit_bars=False,
+              enable_location=True, **kwargs):
         gap = max(0, int(panel_gap))
         W = max(64, int(output_width))
         H = max(64, int(output_height))
 
-        # ---- gather whatever is actually wired in -------------------------- #
+        # ---- gather whatever is actually wired in ----------------------------- #
+        # A panel is included only if its image socket is connected. Empty slots
+        # are skipped automatically and the row reflows to fill the space.
         panels = []  # (slot_index, pil_image, desc, pid)
-        for i in range(1, MAX_PANELS + 1):
+        active = max(1, min(int(num_panels), MAX_PANELS))
+        for i in range(1, active + 1):
             im = _tensor_to_pil(kwargs.get(f"image_{i}"))
             if im is not None:
                 desc = (kwargs.get(f"desc_{i}") or "").strip()
                 pid = (kwargs.get(f"id_{i}") or "").strip()
                 panels.append((i, im, desc, pid))
-        loc_img = _tensor_to_pil(kwargs.get("location_image"))
+        loc_img = _tensor_to_pil(kwargs.get("location_image")) if enable_location else None
         loc_desc = (kwargs.get("location_desc") or "").strip()
         loc_id = (kwargs.get("location_id") or "").strip()
 
@@ -427,10 +444,21 @@ class IngredientsSheetBuilder:
 
         ref_block = "; ".join(p for p in parts if p)
 
+        # Concatenate system prompt + action idea → ready to wire to Generate Text node.
+        # system_prompt already ends with "ACTION IDEA: " so the join is seamless.
+        llm_prompt = system_prompt + (action_idea or "")
+
+        # Pre-built two-part video generation prompt. Wire the LLM output after
+        # "Generated video: " to complete it, or append manually downstream.
+        video_prompt_template = (
+            f"Reference sheet: {ref_block}\n\nGenerated video: "
+        )
+
         return (
             _pil_to_tensor(canvas),
-            ref_block,
             _pil_to_tensor(preview),
+            video_prompt_template,
+            llm_prompt,
         )
 
 
