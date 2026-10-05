@@ -19,14 +19,17 @@ Default sheet size is ~1456x825, matching Lightricks' own example sheets.
 Bigger sheets give each panel more detail and downscale cleanly into the
 pipeline; the output video itself is smaller (~768x448).
 
+This node does NOT write the action prompt. It emits the sheet plus a two-part
+prompt with your SIMPLE action passed straight through; a downstream writer
+(the Action Prompt Writer node, your own LLM, or you by hand) turns that into the
+finished action description.
+
 Outputs:
-  - sheet_image             : the composite sheet (wire to your IC-LoRA ref)
-  - labeled_preview         : same sheet with panel numbers drawn on (for your
-                              eyes only; never feed this to the model)
-  - video_prompt_template   : "Reference sheet: {descriptions}\n\nGenerated video: "
-                              ready to concatenate LLM output after it
-  - llm_prompt              : system_prompt + action_idea, wire to a Generate
-                              Text node to produce the final action description
+  - sheet_image     : the composite sheet (wire to your IC-LoRA ref)
+  - labeled_preview : same sheet with panel numbers drawn on (your eyes only;
+                      never feed this to the model)
+  - prompt          : the two-part reference-sheet + 'Generated video: <your
+                      simple action>' text, ready for a downstream writer
 
 Wire a caption per panel into the desc_* inputs (type it, or wire a text node).
 """
@@ -39,7 +42,7 @@ from PIL import Image, ImageDraw, ImageFont
 # BUILD STAMP - bump this whenever the file changes so you can tell at a glance
 # (and in the ComfyUI startup console) which copy is loaded.
 # ---------------------------------------------------------------------------
-NODE_BUILD = "2026-06-27 #8  (1536x896 default, improved tooltips, LoRA scale tip)"
+NODE_BUILD = "2026-07-30 #18  (decoupled: sheet + descriptions + your SIMPLE action only; removed system_prompt/llm_prompt and the bundled Action Writer/Idea nodes)"
 print(f"[Ingredients Sheet Builder] loaded build: {NODE_BUILD}")
 
 MAX_PANELS = 8  # characters / props (location is handled separately as a fixed input)
@@ -50,37 +53,6 @@ MAX_PANELS = 8  # characters / props (location is handled separately as a fixed 
 # avoids the faint seam/banding artifacts seen with cramped small sheets. So the
 # sheet default is the larger size; it is downscaled to the output res downstream.
 SPEC_W, SPEC_H = 1536, 896
-
-# Starter system prompt for the captioning/LLM node that writes the action prose.
-# Exposed as an output socket so you can wire it directly into a Generate Text node.
-# Your action_idea text should be appended after "ACTION IDEA: " at the end.
-DEFAULT_SYSTEM_PROMPT = (
-    "You are writing the action/video prompt (the motion description) "
-    "for an LTX-2.3 IC-LoRA Ingredients video.\n\n"
-    "You are looking at a REFERENCE SHEET image. It has two zones:\n"
-    "1. CHARACTER PANELS - the individual figure shots (the top row). These show the MAIN "
-    "CHARACTER. Take ALL of the character's appearance details (hair, skin, clothing/armor, "
-    "distinguishing features) ONLY from these panels.\n"
-    "2. LOCATION / SETTING panel - the wide environment shot (the full-width band). This is the "
-    "BACKGROUND only. Use it for the setting and atmosphere. NEVER take the main character's "
-    "appearance from it, and IGNORE any background people, crowds, or bystanders in it.\n\n"
-    "Your task: take the ACTION IDEA given at the very end of this message and expand THAT "
-    "specific action into ONE polished, flowing cinematic description of about 4-7 sentences. "
-    "The action idea is the user's instruction for what happens in the video — you MUST follow "
-    "it. Do NOT invent a different action; whatever the action idea says the character is doing "
-    "(walking, singing, fighting, talking, etc.) is what your description must show.\n\n"
-    "The description must:\n"
-    "- Open with \"From the first frame...\" with the character already performing the action.\n"
-    "- Feature the EXACT main character from the character panels - restate their key appearance "
-    "details so identity holds.\n"
-    "- Set the action in the SAME location shown in the setting panel.\n"
-    "- Describe concrete physical motion with weight and direction.\n"
-    "- Include camera movement (tracking, push-in, arc, whip-pan) fitting the mood.\n"
-    "- End with lighting/atmosphere matching the sheet.\n\n"
-    "Output ONLY the action prose, beginning directly with \"From the first frame\". "
-    "Do NOT write any header.\n\n"
-    "ACTION IDEA: "
-)
 
 
 def _tensor_to_pil(img_tensor):
@@ -205,6 +177,31 @@ def _fit_bars(img, w, h):
     return out
 
 
+# Caption LLMs sometimes prepend chatty preamble like "Here's a description of
+# the character reference panel, aiming for a one-phrase style: ...". Strip it so
+# only the real description survives in the sheet prompt.
+_PREAMBLE_TELLS = (
+    "here's", "here is", "here’s", "aiming for", "reference panel",
+    "i'll describe", "i’ll describe", "based on the image",
+    "based on the panel", "sure,", "okay,", "certainly", "of course",
+    "as requested", "one-phrase", "one phrase", "detailed and concise",
+    "description of the",
+)
+
+
+def _clean_desc(desc: str) -> str:
+    """Drop a leading LLM-preamble clause (ending in ':') and collapse whitespace
+    so each caption is one clean line (no stray newlines/double spaces)."""
+    desc = (desc or "").strip()
+    colon = desc.find(":")
+    if 0 < colon < 220:
+        head = desc[:colon].lower()
+        if any(t in head for t in _PREAMBLE_TELLS):
+            rest = desc[colon + 1:].strip().lstrip(" :;-–—").strip()
+            if len(rest) >= 8:      # only strip if real content remains
+                desc = rest
+    return " ".join(desc.split())   # collapse newlines/tabs/runs of spaces
+
 
 class IngredientsSheetBuilder:
     @classmethod
@@ -283,24 +280,20 @@ class IngredientsSheetBuilder:
                 "show_panel_numbers": ("BOOLEAN", {"default": False,
                                        "tooltip": "Draw panel numbers on the labeled_preview output "
                                                   "(never on the real sheet)."}),
-                "system_prompt": ("STRING", {"multiline": True, "default": DEFAULT_SYSTEM_PROMPT,
-                                  "tooltip": "System prompt for your LLM/caption node. Wires to the "
-                                             "'system' input of a Generate Text node. Edit freely."}),
                 "action_idea": ("STRING", {"multiline": True,
-                                "default": "(describe what you want to happen in the video)",
-                                "tooltip": "What you want to happen in the video. Be as specific as "
-                                           "you like — one line or a full paragraph. The LLM will "
-                                           "expand it into a cinematic description. This is appended "
-                                           "after 'ACTION IDEA:' in the system prompt and output as "
-                                           "llm_prompt, ready to wire to a Generate Text node. "
-                                           "Examples: 'she walks into the bar and orders a drink', "
-                                           "'he fights three guards on a rooftop at sunset'."}),
+                                "default": "",
+                                "tooltip": "Your SIMPLE action, one line - passed straight through "
+                                           "into the prompt after 'Generated video:'. This node does "
+                                           "NOT expand it; a downstream writer (Action Prompt Writer, "
+                                           "your own LLM, or you) turns it into the finished action. "
+                                           "Examples: 'she pulls her sundress down and lies back', "
+                                           "'he walks into the bar and orders a drink'."}),
             },
             "optional": optional,
         }
 
-    RETURN_TYPES = ("IMAGE", "IMAGE", "STRING", "STRING")
-    RETURN_NAMES = ("sheet_image", "labeled_preview", "video_prompt_template", "llm_prompt")
+    RETURN_TYPES = ("IMAGE", "IMAGE", "STRING")
+    RETURN_NAMES = ("sheet_image", "labeled_preview", "prompt")
     FUNCTION = "build"
     CATEGORY = "Ingredients"
     DESCRIPTION = ("Builds a single LTX-2.3 IC-LoRA Ingredients reference sheet: character/prop "
@@ -309,7 +302,7 @@ class IngredientsSheetBuilder:
                    "Tip: the official Ingredients LoRA runs best at strength 1.4.")
 
     def build(self, output_width, output_height, location_position, panel_gap,
-              show_panel_numbers, system_prompt, action_idea, num_panels=4,
+              show_panel_numbers, action_idea, num_panels=4,
               location_height_percent=40, location_fit_bars=False,
               enable_location=True, **kwargs):
         gap = max(0, int(panel_gap))
@@ -424,7 +417,7 @@ class IngredientsSheetBuilder:
         # semicolons, no headers, no position/role labels. If a panel has an ID
         # (name), thread it in so the same character is named consistently.
         def _tag(desc, pid):
-            desc = desc.strip()
+            desc = _clean_desc(desc)      # strip any LLM preamble from the caption
             if not pid:
                 return desc
             if not desc:
@@ -442,25 +435,31 @@ class IngredientsSheetBuilder:
         if loc_img is not None and (loc_desc or loc_id):
             parts.append(_tag(loc_desc, loc_id))
 
-        ref_block = "; ".join(p for p in parts if p)
+        # One panel per paragraph (still ";"-separated, per the LTX Ingredients
+        # format) with a blank line between them so the block is easy to read.
+        ref_block = ";\n\n".join(p for p in parts if p)
 
-        # Concatenate system prompt + action idea → ready to wire to Generate Text node.
-        # system_prompt already ends with "ACTION IDEA: " so the join is seamless.
-        llm_prompt = system_prompt + (action_idea or "")
-
-        # Pre-built two-part video generation prompt. Wire the LLM output after
-        # "Generated video: " to complete it, or append manually downstream.
+        # The two-part prompt, with the user's RAW typed action after
+        # "Generated video: ". This is intentionally NOT LLM-revised — wire it into
+        # the Action Prompt Writer node to turn the raw action into a good one
+        # (or use it as-is). The placeholder default is treated as empty.
+        raw_action = (action_idea or "").strip()
+        if raw_action == "(describe what you want to happen in the video)":
+            raw_action = ""
         video_prompt_template = (
-            f"Reference sheet: {ref_block}\n\nGenerated video: "
+            f"Reference sheet:\n{ref_block}\n\nGenerated video: {raw_action}"
         )
 
         return (
             _pil_to_tensor(canvas),
             _pil_to_tensor(preview),
             video_prompt_template,
-            llm_prompt,
         )
 
 
-NODE_CLASS_MAPPINGS = {"IngredientsSheetBuilder": IngredientsSheetBuilder}
-NODE_DISPLAY_NAME_MAPPINGS = {"IngredientsSheetBuilder": "Ingredients Sheet Builder"}
+NODE_CLASS_MAPPINGS = {
+    "IngredientsSheetBuilder": IngredientsSheetBuilder,
+}
+NODE_DISPLAY_NAME_MAPPINGS = {
+    "IngredientsSheetBuilder": "Ingredients Sheet Builder",
+}
